@@ -177,7 +177,7 @@ $val = fn(string $k) => is_post() && isset($save[$k]) ? $save[$k] : (string)sett
       <?= field_toggle('refund_enabled', 'Rückerstattung aktiv', $val('refund_enabled') === '1') ?>
       <div class="form-row">
         <?= field_text('refund', 'Erstattungsbetrag', money_input($val('refund_cents')), ['help' => 'Wird nach dem Upload eines eigenen Protokolls zurückgezahlt.']) ?>
-        <?= field_text('refund_days', 'Frist (Tage nach Kauf)', $val('refund_days'), ['type' => 'number', 'attrs' => ['min' => 0], 'help' => '0 = keine Frist. Hinweis: Kartenzahlungen kann Stripe meist bis ca. 180 Tage nach Zahlung erstatten.']) ?>
+        <?= field_text('refund_days', 'Frist (Tage nach Kauf)', $val('refund_days'), ['type' => 'number', 'attrs' => ['min' => 0], 'help' => '0 = keine Frist. Bei sehr alten Zahlungen kann eine Erstattung je nach Zahlungsart nicht mehr möglich sein – sie erscheint dann im Adminbereich als fehlgeschlagen.']) ?>
       </div>
       <div class="field">
         <label>Wann wird erstattet?</label>
