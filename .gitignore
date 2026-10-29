@@ -1,0 +1,17 @@
+# Lokale Konfiguration mit Zugangsdaten
+/config/config.php
+
+# Laufzeitdaten
+/storage/uploads/*
+/storage/tmp/*
+/storage/logs/*
+/storage/sessions/*
+/storage/import/*
+!/storage/**/index.html
+!/storage/import/LIESMICH.txt
+!/storage/uploads/index.html
+!/storage/tmp/index.html
+!/storage/logs/index.html
+!/storage/sessions/index.html
+!/storage/import/index.html
+/install/.htaccess

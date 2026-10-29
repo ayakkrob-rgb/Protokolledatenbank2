@@ -1,0 +1,16 @@
+FTP-Import für bestehende Protokollsammlungen
+==============================================
+
+Lade hier per FTP deine Protokolle in folgender Struktur hoch:
+
+  M1/Prof. Dr. Anna Beispiel (Anatomie)/Protokoll 2023-03-14.pdf
+  M1/PD Dr. Clara Probe (Physiologie)/2024-09-02 Gedaechtnisprotokoll.docx
+  M3/Prof. Dr. Ingo Schablone (Chirurgie)/notizen.txt
+
+Erste Ebene  = Prüfung (Kurzname wie im Adminbereich, z. B. M1, M2, M3)
+Zweite Ebene = Prüfer, optional mit Fach in Klammern
+Dateien      = je Datei ein Protokoll (Datum im Dateinamen wird erkannt)
+
+Danach im Adminbereich unter "Import / Migration" -> "Import aus FTP-Ordner"
+die Vorschau öffnen und den Import starten. Importierte Dateien werden in den
+Unterordner _importiert/ verschoben.

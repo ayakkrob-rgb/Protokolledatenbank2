@@ -1,0 +1,25 @@
+# Protokolldatenbank – Apache-Konfiguration (funktioniert ohne Anpassung auf üblichem Webhosting)
+DirectoryIndex index.php
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Interne Ordner und versteckte Dateien sperren (.well-known für SSL-Zertifikate bleibt erlaubt)
+  RewriteRule ^(app|config|storage)(/|$) - [F,L]
+  RewriteRule (^|/)\.(?!well-known) - [F,L]
+</IfModule>
+
+# Sensible Dateitypen nie ausliefern
+<FilesMatch "\.(sql|md|log|lock|bin|ini|sh|dist)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>
