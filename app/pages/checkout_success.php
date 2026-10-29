@@ -48,6 +48,13 @@ if ($p['status'] === 'pending' && $tries < 20) {
         <a class="btn btn-secondary" href="<?= e(url('account')) ?>">Mein Bereich</a>
       </div>
     </div>
+  <?php elseif ($p['status'] === 'processing'): ?>
+    <div class="card empty-state mt-4">
+      <div class="empty-icon"><?= icon('clock') ?></div>
+      <h1>Zahlung wird bearbeitet</h1>
+      <p>Deine Zahlung ist bei Stripe eingegangen, wird aber noch bearbeitet (z. B. bei SEPA-Lastschrift kann das einige Werktage dauern). Sobald sie bestätigt ist, schalten wir deinen Zugang automatisch frei und schicken dir eine E-Mail.</p>
+      <a class="btn btn-secondary" href="<?= e(url('account')) ?>">Zu meinem Bereich</a>
+    </div>
   <?php elseif ($p['status'] === 'pending'): ?>
     <div class="card empty-state mt-4">
       <div class="empty-icon"><?= icon('clock') ?></div>

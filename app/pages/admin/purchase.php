@@ -161,7 +161,7 @@ $defaultRefund = min(Payments::refundFor($p['exam']), (int)$p['amount_cents']);
     <div class="card">
       <h3>Aktionen</h3>
       <div class="btn-group">
-        <?php if (in_array($p['status'], ['pending', 'cancelled', 'failed'], true)): ?>
+        <?php if (in_array($p['status'], ['pending', 'processing', 'cancelled', 'failed'], true)): ?>
           <?= post_button(url('admin/purchase'), icon('check') . ' Als bezahlt markieren', ['id' => $p['id'], 'action' => 'mark_paid'], 'btn btn-success btn-sm', 'Zahlung wirklich als eingegangen markieren? Der Zugang wird sofort freigeschaltet.') ?>
         <?php endif; ?>
         <?php if ($p['status'] === 'paid'): ?>

@@ -133,7 +133,20 @@ class Auth
         $existing = DB::one('SELECT * FROM users WHERE email = ?', [$email]);
         if ($existing) {
             if (!(int)$existing['is_verified'] && !(int)$existing['is_blocked']) {
+                // Unbestätigtes Konto: Daten der neuen Registrierung übernehmen und alten Link ungültig machen.
+                // Sonst könnte jemand eine fremde Adresse vorab mit eigenem Passwort registrieren.
+                self::hitAttempt('register:' . client_ip());
+                DB::update('users', [
+                    'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                    'name' => $name,
+                    'verify_token' => null,
+                    'verify_expires' => null,
+                    'reset_token' => null,
+                    'reset_expires' => null,
+                ], 'id = ?', [$existing['id']]);
+                $existing = DB::one('SELECT * FROM users WHERE id = ?', [$existing['id']]);
                 self::sendVerification($existing);
+                log_activity('register', $email . ' (erneut, unbestätigt)', (int)$existing['id']);
                 return ['ok' => true, 'errors' => [], 'user_id' => (int)$existing['id'], 'resent' => true];
             }
             return ['ok' => false, 'errors' => ['email' => 'Für diese E-Mail-Adresse gibt es bereits ein Konto. Hast du dein Passwort vergessen?'], 'user_id' => null];

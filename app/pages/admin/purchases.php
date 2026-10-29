@@ -14,7 +14,7 @@ $to = get_str('to');
 
 $where = ['1=1'];
 $params = [];
-if (in_array($status, ['pending', 'paid', 'cancelled', 'failed', 'revoked'], true)) {
+if (in_array($status, ['pending', 'processing', 'paid', 'cancelled', 'failed', 'revoked'], true)) {
     $where[] = 'p.status = ?';
     $params[] = $status;
 }
@@ -103,7 +103,7 @@ foreach (DB::all('SELECT id, name FROM exams ORDER BY sort_order, name') as $x) 
 <form method="get" action="<?= e(base_url() . 'index.php') ?>" class="filters">
   <input type="hidden" name="p" value="admin/purchases">
   <div class="field grow"><label>Suche</label><input class="input" type="search" name="q" value="<?= e($q) ?>" placeholder="E-Mail, Name, Kauf-Nr. oder pi_…"></div>
-  <?= field_select('status', 'Status', ['' => 'Alle', 'paid' => 'Bezahlt', 'pending' => 'Offen', 'cancelled' => 'Abgebrochen', 'failed' => 'Fehlgeschlagen', 'revoked' => 'Entzogen'], $status, ['attrs' => ['data-autosubmit' => true]]) ?>
+  <?= field_select('status', 'Status', ['' => 'Alle', 'paid' => 'Bezahlt', 'pending' => 'Offen', 'processing' => 'In Bearbeitung (SEPA)', 'cancelled' => 'Abgebrochen', 'failed' => 'Fehlgeschlagen', 'revoked' => 'Entzogen'], $status, ['attrs' => ['data-autosubmit' => true]]) ?>
   <?= field_select('refund', 'Erstattung', ['' => 'Alle', 'none' => 'Keine', 'succeeded' => 'Erstattet', 'pending' => 'Wird ausgezahlt', 'problem' => 'Handlungsbedarf', 'failed' => 'Fehlgeschlagen', 'manual' => 'Manuell'], $refund, ['attrs' => ['data-autosubmit' => true]]) ?>
   <?= field_select('provider', 'Anbieter', ['' => 'Alle', 'stripe' => 'Stripe', 'simulation' => 'Simulation', 'manual' => 'Manuell'], $provider, ['attrs' => ['data-autosubmit' => true]]) ?>
   <?= field_select('exam', 'Prüfung', $examOptions, $examId ?: '', ['attrs' => ['data-autosubmit' => true]]) ?>

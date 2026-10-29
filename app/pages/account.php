@@ -69,7 +69,7 @@ $purchases = DB::all(
 );
 $otherPurchases = DB::all(
     "SELECT p.*, x.name AS exam_name FROM purchases p JOIN exams x ON x.id = p.exam_id
-     WHERE p.user_id = ? AND p.status IN ('pending','failed','cancelled') ORDER BY p.id DESC LIMIT 10",
+     WHERE p.user_id = ? AND p.status IN ('pending','processing','failed','cancelled') ORDER BY p.id DESC LIMIT 10",
     [$user['id']]
 );
 $uploads = DB::all(

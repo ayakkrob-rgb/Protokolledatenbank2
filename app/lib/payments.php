@@ -8,7 +8,7 @@
  *  3. Bestätigung (Webhook oder Rückkehr von Stripe) → status=paid, Zugang aktiv
  *  4. Eigenes Protokoll wird veröffentlicht → automatische Teil-Erstattung
  *
- * Status eines Kaufs:        pending | paid | cancelled | failed | revoked
+ * Status eines Kaufs:        pending | processing (Zahlung läuft, z. B. SEPA) | paid | cancelled | failed | revoked
  * Status der Rückerstattung: none | processing | pending | succeeded | failed | manual
  * Anbieter (provider):       stripe | simulation | manual
  */
@@ -199,7 +199,7 @@ class Payments
     {
         $changed = DB::tx(function () use ($purchaseId, $data) {
             $p = DB::one('SELECT * FROM purchases WHERE id = ? FOR UPDATE', [$purchaseId]);
-            if (!$p || !in_array($p['status'], ['pending', 'cancelled', 'failed'], true)) {
+            if (!$p || !in_array($p['status'], ['pending', 'processing', 'cancelled', 'failed'], true)) {
                 return false;
             }
             $days = Settings::int('access_days');
@@ -236,7 +236,13 @@ class Payments
 
     public static function markFailed(int $purchaseId): void
     {
-        DB::q("UPDATE purchases SET status = 'failed' WHERE id = ? AND status = 'pending'", [$purchaseId]);
+        DB::q("UPDATE purchases SET status = 'failed' WHERE id = ? AND status IN ('pending','processing')", [$purchaseId]);
+    }
+
+    /** Zahlung abgeschlossen, aber Geld noch nicht eingegangen (z. B. SEPA-Lastschrift). */
+    public static function markProcessing(int $purchaseId): void
+    {
+        DB::q("UPDATE purchases SET status = 'processing' WHERE id = ? AND status IN ('pending','cancelled')", [$purchaseId]);
     }
 
     /** Verarbeitet eine Stripe-Checkout-Session (aus Webhook oder Rückleitung). */
@@ -250,7 +256,8 @@ class Payments
         if (!$p || $p['provider'] !== 'stripe') {
             return null;
         }
-        if ($p['stripe_session_id'] && $p['stripe_session_id'] !== ($session['id'] ?? '')) {
+        // Nur die Session akzeptieren, die wir selbst für diesen Kauf erstellt haben.
+        if (empty($p['stripe_session_id']) || $p['stripe_session_id'] !== ($session['id'] ?? '')) {
             app_log('warning', 'Stripe-Session ' . ($session['id'] ?? '?') . ' passt nicht zu Kauf #' . $pid);
             return null;
         }
@@ -260,14 +267,24 @@ class Payments
             if (is_array($intent)) {
                 $intent = $intent['id'] ?? null;
             }
-            if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$p['amount_cents']) {
-                app_log('warning', 'Kauf #' . $pid . ': Stripe-Betrag ' . $session['amount_total'] . ' weicht vom erwarteten Betrag ' . $p['amount_cents'] . ' ab.');
+            $amount = (int)($session['amount_total'] ?? -1);
+            $currency = strtolower((string)($session['currency'] ?? $p['currency']));
+            if ($amount < (int)$p['amount_cents'] || $currency !== strtolower((string)$p['currency'])) {
+                app_log('error', 'Kauf #' . $pid . ': Stripe-Betrag ' . $amount . ' ' . $currency . ' passt nicht zu ' . $p['amount_cents'] . ' ' . $p['currency'] . ' – nicht freigeschaltet.');
+                Mails::admin('Zahlung mit abweichendem Betrag', [
+                    'Für Kauf #' . $pid . ' meldet Stripe ' . money(max(0, $amount), $currency) . ' statt ' . money($p['amount_cents'], $p['currency']) . '.',
+                    'Der Zugang wurde nicht automatisch freigeschaltet. Bitte im Stripe-Dashboard prüfen und ggf. manuell als bezahlt markieren.',
+                ], url('admin/purchase', ['id' => $pid]));
+                return $pid;
             }
             self::markPaid($pid, [
                 'payment_intent' => $intent,
                 'session_id' => $session['id'] ?? null,
-                'amount' => $session['amount_total'] ?? null,
+                'amount' => $amount,
             ]);
+        } elseif (($session['status'] ?? '') === 'complete') {
+            // Checkout abgeschlossen, Zahlung (z. B. SEPA) noch in Bearbeitung
+            self::markProcessing($pid);
         }
         return $pid;
     }
@@ -275,29 +292,33 @@ class Payments
     /** Fügt einem bezahlten Kauf weitere Prüfer hinzu (bis zum Maximum). */
     public static function addExaminers(int $purchaseId, array $examinerIds): int
     {
-        $p = DB::one('SELECT * FROM purchases WHERE id = ?', [$purchaseId]);
-        $exam = $p ? DB::one('SELECT * FROM exams WHERE id = ?', [$p['exam_id']]) : null;
-        if (!$p || !$exam) {
-            return 0;
-        }
-        $current = array_map('intval', DB::col('SELECT examiner_id FROM purchase_examiners WHERE purchase_id = ?', [$purchaseId]));
-        $free = self::maxExaminers($exam) - count($current);
-        $added = 0;
-        foreach (array_unique(array_map('intval', $examinerIds)) as $eid) {
-            if ($free <= 0) {
-                break;
+        // Sperre auf den Kauf, damit parallele Anfragen das Maximum nicht überschreiten können
+        $added = DB::tx(function () use ($purchaseId, $examinerIds) {
+            $p = DB::one("SELECT * FROM purchases WHERE id = ? AND status = 'paid' FOR UPDATE", [$purchaseId]);
+            $exam = $p ? DB::one('SELECT * FROM exams WHERE id = ?', [$p['exam_id']]) : null;
+            if (!$p || !$exam) {
+                return 0;
             }
-            if (in_array($eid, $current, true)) {
-                continue;
+            $current = array_map('intval', DB::col('SELECT examiner_id FROM purchase_examiners WHERE purchase_id = ?', [$purchaseId]));
+            $free = self::maxExaminers($exam) - count($current);
+            $added = 0;
+            foreach (array_unique(array_map('intval', $examinerIds)) as $eid) {
+                if ($free <= 0) {
+                    break;
+                }
+                if (in_array($eid, $current, true)) {
+                    continue;
+                }
+                $valid = DB::val('SELECT COUNT(*) FROM examiners WHERE id = ? AND exam_id = ?', [$eid, $p['exam_id']]);
+                if (!$valid) {
+                    continue;
+                }
+                DB::insert('purchase_examiners', ['purchase_id' => $purchaseId, 'examiner_id' => $eid]);
+                $free--;
+                $added++;
             }
-            $valid = DB::val('SELECT COUNT(*) FROM examiners WHERE id = ? AND exam_id = ?', [$eid, $p['exam_id']]);
-            if (!$valid) {
-                continue;
-            }
-            DB::insert('purchase_examiners', ['purchase_id' => $purchaseId, 'examiner_id' => $eid]);
-            $free--;
-            $added++;
-        }
+            return $added;
+        });
         if ($added) {
             self::clearCache();
             log_activity('purchase_examiners_added', 'Kauf #' . $purchaseId . ': ' . $added . ' Prüfer nachgetragen');
@@ -469,8 +490,6 @@ class Payments
             return ['status' => 'not_applicable'];
         }
         $amount = (int)$p['refund_cents'];
-        $attempt = (int)$p['refund_attempts'] + 1;
-        DB::update('purchases', ['refund_attempts' => $attempt], 'id = ?', [$purchaseId]);
         $result = ['amount' => $amount, 'purchase_id' => $purchaseId];
 
         if ($p['provider'] === 'simulation') {
@@ -488,18 +507,29 @@ class Payments
             if (!$p['stripe_payment_intent']) {
                 return self::failRefund($purchaseId, 'Zu diesem Kauf ist keine Stripe-Zahlungs-ID gespeichert.') + $result;
             }
-            try {
-                $refund = Stripe::request('POST', 'refunds', [
-                    'payment_intent' => $p['stripe_payment_intent'],
-                    'amount' => $amount,
-                    'reason' => 'requested_by_customer',
-                    'metadata' => [
-                        'purchase_id' => (string)$purchaseId,
-                        'protocol_id' => (string)($p['refund_protocol_id'] ?? ''),
-                    ],
-                ], 'refund_' . $purchaseId . '_' . $attempt . '_' . substr(hash('sha256', APP_KEY . $purchaseId), 0, 8));
-            } catch (Throwable $e) {
-                return self::failRefund($purchaseId, $e->getMessage()) + $result;
+            // Wurde bei einem früheren Versuch (z. B. trotz Zeitüberschreitung) schon erstattet? Dann übernehmen statt doppelt erstatten.
+            $refund = self::findExistingStripeRefund($p);
+            if ($refund === null) {
+                // Der Versuchszähler ist Teil des Idempotenz-Schlüssels. Er wird nur nach eindeutigen
+                // Fehlermeldungen von Stripe erhöht – nach Netzwerkfehlern wird derselbe Schlüssel wiederverwendet.
+                $attempt = (int)$p['refund_attempts'] + 1;
+                try {
+                    $refund = Stripe::request('POST', 'refunds', [
+                        'payment_intent' => $p['stripe_payment_intent'],
+                        'amount' => $amount,
+                        'reason' => 'requested_by_customer',
+                        'metadata' => [
+                            'purchase_id' => (string)$purchaseId,
+                            'protocol_id' => (string)($p['refund_protocol_id'] ?? ''),
+                        ],
+                    ], 'refund_' . $purchaseId . '_' . $attempt . '_' . substr(hash('sha256', APP_KEY . $purchaseId), 0, 8));
+                    DB::update('purchases', ['refund_attempts' => $attempt], 'id = ?', [$purchaseId]);
+                } catch (Throwable $e) {
+                    if ($e instanceof StripeException && $e->getCode() >= 400) {
+                        DB::update('purchases', ['refund_attempts' => $attempt], 'id = ?', [$purchaseId]);
+                    }
+                    return self::failRefund($purchaseId, $e->getMessage()) + $result;
+                }
             }
             $st = (string)($refund['status'] ?? 'pending');
             $mapped = $st === 'succeeded' ? 'succeeded' : (in_array($st, ['failed', 'canceled'], true) ? 'failed' : 'pending');
@@ -525,6 +555,22 @@ class Payments
             'Bitte ' . money($amount) . ' persönlich auszahlen und die Erstattung anschließend im Adminbereich als erledigt markieren.',
         ], url('admin/purchase', ['id' => $purchaseId]));
         return $result + ['status' => 'manual'];
+    }
+
+    /** Sucht bei Stripe nach einer bereits angelegten Erstattung für diesen Kauf. */
+    private static function findExistingStripeRefund(array $p): ?array
+    {
+        try {
+            $list = Stripe::request('GET', 'refunds', ['payment_intent' => $p['stripe_payment_intent'], 'limit' => 20]);
+        } catch (Throwable $e) {
+            return null;
+        }
+        foreach ($list['data'] ?? [] as $r) {
+            if ((string)($r['metadata']['purchase_id'] ?? '') === (string)$p['id'] && in_array($r['status'] ?? '', ['succeeded', 'pending', 'requires_action'], true)) {
+                return $r;
+            }
+        }
+        return null;
     }
 
     private static function failRefund(int $purchaseId, string $error): array
@@ -622,6 +668,7 @@ class Payments
     {
         $map = [
             'pending' => ['Offen', 'warning'],
+            'processing' => ['Zahlung in Bearbeitung', 'info'],
             'paid' => ['Bezahlt', 'success'],
             'cancelled' => ['Abgebrochen', 'neutral'],
             'failed' => ['Fehlgeschlagen', 'danger'],
